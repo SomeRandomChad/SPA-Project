@@ -1,0 +1,208 @@
+openapi: 3.0.3
+
+info:
+  title: LLM Rephrase API
+  description: Rephrases input text into multiple writing styles.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://api.example.com
+    description: Production
+  - url: https://staging-api.example.com
+    description: Staging
+
+tags:
+  - name: Rephrase
+    description: Endpoints that transform text into different styles.
+
+paths:
+  /rephrase:
+    post:
+      tags:
+        - Rephrase
+      summary: Rephrase text into multiple writing styles
+      description: >
+        Accepts a block of text and returns rephrased variants across several
+        writing styles (professional, casual, polite, social).
+      operationId: rephraseText
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RephraseRequest"
+            examples:
+              simple:
+                summary: Basic rephrase
+                value:
+                  text: "Please review the attached document."
+
+      responses:
+        "200":
+          description: Rephrased text in multiple styles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RephraseResponse"
+              examples:
+                default:
+                  summary: Example rephrased output
+                  value:
+                    professional: "Please review the attached document."
+                    casual: "Hey, can you take a look at this?"
+                    polite: "Could you please review the attached document?"
+                    social: "Hey everyone, check this out!"
+
+        "400":
+          description: Invalid request (malformed JSON, missing required field, or validation error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                missingText:
+                  summary: Missing required field
+                  value:
+                    code: "VALIDATION_ERROR"
+                    message: "Field 'text' is required."
+                    details:
+                      - field: "text"
+                        issue: "required"
+                emptyText:
+                  summary: Text too short
+                  value:
+                    code: "VALIDATION_ERROR"
+                    message: "Field 'text' must be at least 1 character."
+                    details:
+                      - field: "text"
+                        issue: "min_length"
+                        hint: "Provide a non-empty string."
+
+        "429":
+          description: Too Many Requests (rate limit exceeded)
+          headers:
+            Retry-After:
+              description: Seconds until the client should retry the request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                throttled:
+                  value:
+                    code: "RATE_LIMIT_EXCEEDED"
+                    message: "Too many requests. Please retry after the specified time."
+
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                generic:
+                  value:
+                    code: "INTERNAL_ERROR"
+                    message: "An unexpected error occurred."
+
+        "502":
+          description: LLM provider failure (upstream error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                upstream:
+                  value:
+                    code: "LLM_PROVIDER_FAILURE"
+                    message: "The upstream LLM provider returned an error."
+
+        "504":
+          description: LLM request timeout
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                timeout:
+                  value:
+                    code: "LLM_TIMEOUT"
+                    message: "The LLM request timed out."
+
+components:
+  schemas:
+    RephraseRequest:
+      type: object
+      required:
+        - text
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          description: Text to be rephrased.
+          minLength: 1
+          maxLength: 5000
+      example:
+        text: "Please review the attached document."
+
+    RephraseResponse:
+      type: object
+      required:
+        - professional
+        - casual
+        - polite
+        - social
+      additionalProperties: false
+      properties:
+        professional:
+          type: string
+          description: Rephrased professional tone.
+        casual:
+          type: string
+          description: Rephrased casual tone.
+        polite:
+          type: string
+          description: Rephrased polite tone.
+        social:
+          type: string
+          description: Rephrased social/media tone.
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          description: Human-readable error message.
+          example: "Field 'text' is required."
+        details:
+          type: array
+          description: Optional list of field-level issues.
+          items:
+            type: object
+            required:
+              - field
+              - issue
+            properties:
+              field:
+                type: string
+                example: "text"
+              issue:
+                type: string
+                example: "required"
+              hint:
+                type: string
+                description: Optional additional context.
+                example: "Must be a non-empty string."
