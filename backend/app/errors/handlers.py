@@ -7,9 +7,14 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.llm.provider_errors import LLMProviderError
+# Optional: if you want explicit typing here, uncomment:
+# from app.llm.parse import ModelOutputError
+
 
 def _field_from_loc(loc: Tuple[Any, ...]) -> str:
     """
+    FastAPI/Pydantic loc examples:
       ("body", "text")
       ("query", "limit")
       ("body", "items", 0, "name")
@@ -21,6 +26,9 @@ def _field_from_loc(loc: Tuple[Any, ...]) -> str:
 
 
 def _issue_from_pydantic_type(err_type: str) -> str:
+    """
+    Map Pydantic error types to stable-ish issue codes.
+    """
     mapping = {
         "missing": "required",
         "string_too_short": "min_length",
@@ -32,22 +40,24 @@ def _issue_from_pydantic_type(err_type: str) -> str:
     return mapping.get(err_type, err_type)
 
 
-async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """
+    Normalize FastAPI/Pydantic request validation errors into HTTP 400.
+    """
     errors = exc.errors()
 
     details: List[Dict[str, str]] = []
     for e in errors:
         loc = tuple(e.get("loc", ()))
         err_type = str(e.get("type", "validation_error"))
-        msg = str(e.get("msg", "Invalid request"))
 
         field = _field_from_loc(loc)
         issue = _issue_from_pydantic_type(err_type)
 
         item: Dict[str, str] = {"field": field, "issue": issue}
 
-        # Optional hint. Keep it short; this is user-facing.
-        # You can also derive hints from ctx (min_length/max_length) if you want.
         ctx = e.get("ctx") or {}
         hint: Optional[str] = None
         if issue == "required":
@@ -66,20 +76,33 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 
         details.append(item)
 
-    # Build a stable, readable top-level message.
-    # Prefer the first error for the summary.
     if details:
         first = details[0]
-        field = first.get("field", "request")
-        issue = first.get("issue", "validation_error")
-        message = f"Invalid request: {field} ({issue})"
+        message = f"Invalid request: {first.get('field', 'request')} ({first.get('issue', 'validation_error')})"
     else:
         message = "Invalid request."
 
-    payload = {
-        "code": "VALIDATION_ERROR",
-        "message": message,
-        "details": details,
-    }
+    return JSONResponse(
+        status_code=400,
+        content={"code": "VALIDATION_ERROR", "message": message, "details": details},
+    )
 
-    return JSONResponse(status_code=400, content=payload)
+
+async def llm_provider_exception_handler(request: Request, exc: LLMProviderError) -> JSONResponse:
+    headers: Dict[str, str] = {}
+    if exc.status_code == 429 and exc.retry_after_seconds is not None:
+        headers["Retry-After"] = str(exc.retry_after_seconds)
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": exc.code, "message": exc.message, "details": []},
+        headers=headers,
+    )
+
+
+async def model_output_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # If you prefer explicit typing, change `exc: Exception` to `exc: ModelOutputError`
+    return JSONResponse(
+        status_code=500,
+        content={"code": "INTERNAL_ERROR", "message": "Invalid model output.", "details": []},
+    )

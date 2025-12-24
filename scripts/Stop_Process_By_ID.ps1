@@ -1,0 +1,1 @@
+﻿Stop-Process -Id <ID> -Force

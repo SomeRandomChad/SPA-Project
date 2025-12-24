@@ -1,0 +1,1 @@
+﻿Get-Process python,uvicorn -ErrorAction SilentlyContinue | Stop-Process -Force

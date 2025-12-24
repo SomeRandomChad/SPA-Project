@@ -1,6 +1,8 @@
 """rephrase_service"""
 
 from app.schemas.rephrase import RephraseRequest, RephraseResponse
+import app.llm.factory as llm_factory
+from app.llm.rephrase_generator import generate_rephrases
 
 
 class ValidationError(Exception):
@@ -19,12 +21,7 @@ def validate_input(input: RephraseRequest) -> str:
 
     return trimmed
 
-
 async def rephrase_service(input: RephraseRequest) -> RephraseResponse:
     text = validate_input(input)
-    return RephraseResponse(
-        professional=text,
-        casual=text,
-        polite=text,
-        social=text,
-    )
+    provider = llm_factory.get_llm_provider()
+    return await generate_rephrases(provider, text)
