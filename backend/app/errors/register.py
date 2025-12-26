@@ -1,9 +1,14 @@
+# backend/app/errors/register.py
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from app.llm.parse import ModelOutputError
 from app.llm.provider_errors import LLMProviderError
-from .handlers import request_validation_exception_handler, model_output_exception_handler, llm_provider_exception_handler
+from .handlers import (
+    llm_provider_exception_handler,
+    model_output_exception_handler,
+    request_validation_exception_handler,
+)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
