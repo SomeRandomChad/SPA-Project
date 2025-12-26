@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { rephrase, type RephraseResponse } from "./api/rephrase";
 
 type Status = "idle" | "loading" | "success" | "error";
+
 
 const emptyResult: RephraseResponse = {
   professional: "",
@@ -27,11 +28,22 @@ function Panel({ title, value }: { title: string; value: string }) {
   );
 }
 
+function isAbortError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "name" in err &&
+    (err as any).name === "AbortError"
+  );
+}
+
 export default function App() {
   const [text, setText] = useState<string>("");
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<RephraseResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
 
   const isLoading = status === "loading";
   const canSubmit = useMemo(
@@ -50,19 +62,43 @@ export default function App() {
       return;
     }
 
+    abortRef.current?.abort();
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setStatus("loading");
     setErrorMessage(null);
 
     try {
-      const data = await rephrase(trimmed);
+      const data = await rephrase(trimmed, controller.signal);
+      if (controller.signal.aborted) return;
+
       setResult(data);
       setStatus("success");
     } catch (err) {
+      if (isAbortError(err)){
+        setStatus("idle");
+        setErrorMessage(null);
+        return
+      }
+
       const msg = err instanceof Error ? err.message : "Something went wrong";
       setResult(null);
       setStatus("error");
       setErrorMessage(msg);
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
+  }
+
+  function onCancel() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStatus("idle");
+    setErrorMessage(null);
   }
 
   const display = result ?? emptyResult;
@@ -83,24 +119,41 @@ export default function App() {
           />
         </label>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 8,
-              border: "1px solid #111",
-              background: canSubmit ? "#111" : "#666",
-              color: "#fff",
-              cursor: canSubmit ? "pointer" : "not-allowed",
-            }}
-          >
-            {isLoading ? "Rephrasing..." : "Rephrase"}
-          </button>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        style={{
+          padding: "10px 14px",
+          borderRadius: 8,
+          border: "1px solid #111",
+          background: canSubmit ? "#111" : "#666",
+          color: "#fff",
+          cursor: canSubmit ? "pointer" : "not-allowed",
+        }}
+      >
+        {isLoading ? "Rephrasing..." : "Rephrase"}
+      </button>
 
-          {isLoading && <span style={{ color: "#555" }}>Loading...</span>}
-        </div>
+      {isLoading && (
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 8,
+            border: "1px solid #999",
+            background: "#fff",
+            color: "#111",
+            cursor: "pointer",
+          }}
+        >
+          Cancel
+        </button>
+      )}
+
+      {isLoading && <span style={{ color: "#555" }}>Loading...</span>}
+    </div>
 
         {status === "error" && errorMessage && (
           <div
