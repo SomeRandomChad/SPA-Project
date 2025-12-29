@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
+import { rephraseStream } from "./api/rephraseStream";
 import { rephrase, type RephraseResponse } from "./api/rephrase";
 
 type Status = "idle" | "loading" | "success" | "error";
@@ -42,6 +43,7 @@ export default function App() {
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<RephraseResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [useStreaming, setUseStreaming] = useState<boolean>(false);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -62,6 +64,7 @@ export default function App() {
       return;
     }
 
+    // Cancel any in-flight request
     abortRef.current?.abort();
 
     const controller = new AbortController();
@@ -70,17 +73,68 @@ export default function App() {
     setStatus("loading");
     setErrorMessage(null);
 
-    try {
-      const data = await rephrase(trimmed, controller.signal);
-      if (controller.signal.aborted) return;
+    // If streaming, start with empty panels
+    if (useStreaming) {
+      setResult({ professional: "", casual: "", polite: "", social: "" });
+    }
 
-      setResult(data);
-      setStatus("success");
+    try {
+      // ---- Non-streaming (existing behavior) ----
+      if (!useStreaming) {
+        const data = await rephrase(trimmed, controller.signal);
+        if (controller.signal.aborted) return;
+
+        setResult(data);
+        setStatus("success");
+        return;
+      }
+
+      // ---- Streaming ----
+      let current: RephraseResponse = {
+        professional: "",
+        casual: "",
+        polite: "",
+        social: "",
+      };
+
+      for await (const ev of rephraseStream(trimmed, controller.signal)) {
+        if (controller.signal.aborted) return;
+
+        if (ev.type === "partial") {
+          // Update panel incrementally
+          setResult((prev) => {
+            const base: RephraseResponse = prev ?? {
+              professional: "",
+              casual: "",
+              polite: "",
+              social: "",
+            };
+
+            return {
+              ...base,
+              [ev.style]: base[ev.style] + ev.delta,
+            };
+          });
+
+          // Let the browser paint between chunks (React 18 dev can otherwise batch)
+          if (process.env.NODE_ENV !== "production") {
+            await new Promise((r) => setTimeout(r, 0));
+          }
+        } else if (ev.type === "final") {
+          setResult(ev.data);
+          setStatus("success");
+          return;
+        } else if (ev.type === "error") {
+          setStatus("error");
+          setErrorMessage(`${ev.error.code}: ${ev.error.message}`);
+          return;
+        }
+      }
     } catch (err) {
-      if (isAbortError(err)){
+      if (isAbortError(err)) {
         setStatus("idle");
         setErrorMessage(null);
-        return
+        return;
       }
 
       const msg = err instanceof Error ? err.message : "Something went wrong";
@@ -93,6 +147,8 @@ export default function App() {
       }
     }
   }
+
+
 
   function onCancel() {
     abortRef.current?.abort();
@@ -118,7 +174,15 @@ export default function App() {
             style={{ padding: 12, borderRadius: 8, border: "1px solid #ccc", resize: "vertical" }}
           />
         </label>
-
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={useStreaming}
+            onChange={(e) => setUseStreaming(e.target.checked)}
+            disabled={isLoading}
+          />
+          <span>Stream results</span>
+        </label>
     <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
       <button
         type="submit"

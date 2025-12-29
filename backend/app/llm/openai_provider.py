@@ -1,7 +1,7 @@
 # backend/app/llm/openai_provider.py
 from __future__ import annotations
 
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from openai import (
     AsyncAzureOpenAI,
@@ -53,7 +53,82 @@ class AzureOpenAIProvider:
             api_version=settings.azure_api_version,
         )
         self._timeout = settings.azure_timeout_seconds
+    
+    async def complete_stream(self, prompt: str) -> AsyncIterator[str]:
+        try:
+            stream = await self._client.chat.completions.create(
+                model=self._deployment,
+                messages=[{"role": "user", "content": prompt}],
+                timeout=self._timeout,
+                stream=True,
+                temperature=0,
+            )
 
+            async for event in stream:
+                # Each event has choices; each choice has a delta with optional content
+                for choice in getattr(event, "choices", []) or []:
+                    delta = getattr(choice, "delta", None)
+                    content = getattr(delta, "content", None) if delta is not None else None
+                    if content:
+                        yield content
+
+        except RateLimitError as e:
+            raise LLMProviderError(
+                status_code=429,
+                code="RATE_LIMIT_EXCEEDED",
+                message="Too many requests. Please retry after the specified time.",
+                retry_after_seconds=_try_retry_after_seconds(e),
+            ) from e
+
+        except APITimeoutError as e:
+            raise LLMProviderError(
+                status_code=504,
+                code="LLM_TIMEOUT",
+                message="The LLM request timed out.",
+            ) from e
+
+        except APIConnectionError as e:
+            raise LLMProviderError(
+                status_code=502,
+                code="LLM_PROVIDER_FAILURE",
+                message="Failed to connect to the upstream LLM provider.",
+            ) from e
+
+        except (AuthenticationError, PermissionDeniedError) as e:
+            raise LLMProviderError(
+                status_code=502,
+                code="LLM_PROVIDER_FAILURE",
+                message="Upstream authentication/authorization failed.",
+            ) from e
+
+        except NotFoundError as e:
+            raise LLMProviderError(
+                status_code=502,
+                code="LLM_PROVIDER_FAILURE",
+                message="Upstream model/deployment was not found.",
+            ) from e
+
+        except BadRequestError as e:
+            raise LLMProviderError(
+                status_code=502,
+                code="LLM_PROVIDER_FAILURE",
+                message="Upstream rejected the request.",
+            ) from e
+
+        except InternalServerError as e:
+            raise LLMProviderError(
+                status_code=502,
+                code="LLM_PROVIDER_FAILURE",
+                message="Upstream provider encountered an internal error.",
+            ) from e
+
+        except Exception as e:
+            raise LLMProviderError(
+                status_code=502,
+                code="LLM_PROVIDER_FAILURE",
+                message="Upstream provider request failed.",
+            ) from e
+    
     async def complete(self, prompt: str) -> str:
         try:
             resp = await self._client.chat.completions.create(
