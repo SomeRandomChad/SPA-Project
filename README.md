@@ -7,13 +7,26 @@ Single-page app (React) + backend API (FastAPI) that rephrases user input into f
 - Polite
 - Social media
 
-## Frozen API Contract found in SPA-Project\api\openapi.yml
+---
+
+## Frozen API Contract
+
+The canonical API contract is defined in:
+
+SPA-Project/api/openapi.yml
+
+
+This contract is **frozen** and enforced via automated tests.
+
+---
 
 ## Request
+
 ```json
 { "text": "..." }
 
-## Response
+Response
+
 {
   "professional": "...",
   "casual": "...",
@@ -21,117 +34,187 @@ Single-page app (React) + backend API (FastAPI) that rephrases user input into f
   "social": "..."
 }
 
-## Repo Structure
-    frontend/ — React SPA (Create React App)
-    backend/ — FastAPI API + tests
-    scripts/ — PowerShell helpers for common tasks
+Streaming Support (SSE)
 
-## Prerequisites
-    Node.js (for frontend)
-    Python 3.12+ (project tested on Windows with Python 3.14)
+The backend supports incremental streaming responses using Server-Sent Events (SSE).
+Streaming Endpoint
+
+POST /rephrase/stream
+
+    Uses text/event-stream
+
+    Emits partial updates as the LLM generates output
+
+    Ends with a final event matching the frozen response contract
+
+    Fully cancellable by the client
+
+SSE Event Types
+Event	Description
+partial	Incremental text update for a single style
+final	Complete response (same shape as non-streaming API)
+error	Normalized error payload
+
+Example partial event payload:
+
+{
+  "style": "professional",
+  "delta": "Please review"
+}
+
+Example final event payload:
+
+{
+  "professional": "...",
+  "casual": "...",
+  "polite": "...",
+  "social": "..."
+}
+
+Repository Structure
+
+frontend/ — React SPA (Create React App)
+backend/  — FastAPI API + tests
+scripts/  — PowerShell helpers for common tasks
+
+Prerequisites
+
+    Node.js (frontend)
+
+    Python 3.12+ (tested on Windows with Python 3.14)
+
     PowerShell (Windows)
 
-## Backend Setup
+Backend Setup
 
-    From C:\SPA-Project\backend:
+From:
 
-    python -m pip install -r requirements.txt
-    python -m pytest -q
+C:\SPA-Project\backend
 
-    Run backend (Fake mode — default, no token usage)
+Install dependencies and run tests:
 
-    Fake mode is the recommended default for development.
+python -m pip install -r requirements.txt
+python -m pytest -q
 
-    cd C:\SPA-Project\backend
-    python -m uvicorn app.main:app --reload --port 3000
+Running the Backend (Fake LLM — Default)
 
-    You can also use the provided scripts (see Scripts below).
+Fake mode is the recommended default for development.
+No tokens are used.
 
-## Frontend Setup
-    From C:\SPA-Project\frontend:
-    
-    npm install
-    npm start
-    
-    default dev URL is:
-    http://localhost:3001
-    The frontend calls the backend at:
-    http://127.0.0.1:3000
+cd C:\SPA-Project\backend
+python -m uvicorn app.main:app --reload --port 3000
 
-## Running End-to-End (Recommended Workflow)
+Frontend Setup
 
-    Terminal 1 (backend):
-    cd C:\SPA-Project\backend
-    python -m uvicorn app.main:app --reload --port 3000
+From:
 
+C:\SPA-Project\frontend
 
-    Terminal 2 (frontend):
-    cd C:\SPA-Project\frontend
-    npm start
+npm install
+npm start
 
-## Real LLM Mode (Azure OpenAI) — Token/Spend Safety
+    Frontend: http://localhost:3001
 
-    The backend supports Fake and Real modes. Real mode is guarded by an explicit opt-in to prevent accidental spend.
+    Backend: http://127.0.0.1:3000
 
-    Configuration files
-    backend/.env.example — committed (template, no secrets)
-    backend/.env — local only (DO NOT COMMIT), is included in .gitignore
+Running End-to-End (Recommended Workflow)
+Terminal 1 — Backend
 
-## Required env vars for Azure OpenAI
+cd C:\SPA-Project\backend
+python -m uvicorn app.main:app --reload --port 3000
 
-    In backend/.env (local only):
+Terminal 2 — Frontend
 
-    LLM_MODE=real
-    ALLOW_REAL_LLM=1
+cd C:\SPA-Project\frontend
+npm start
 
-    AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
-    AZURE_OPENAI_API_KEY=<your-key>
-    AZURE_OPENAI_API_VERSION=2024-10-21
-    AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
-    AZURE_OPENAI_TIMEOUT_SECONDS=30
-    Notes:
-    AZURE_OPENAI_DEPLOYMENT is the deployment name in Azure (often set to something like gpt-5-chat).
-    The backend loads .env at startup (via python-dotenv).
+Real LLM Mode (Azure OpenAI) — Token Safety
 
-## Start backend in Real mode
-    cd C:\SPA-Project\backend
-    python -m uvicorn app.main:app --reload --port 3000
+Real LLM usage is explicitly gated to prevent accidental spend.
+Configuration Files
 
-## One manual request (PowerShell)
-    Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:3000/rephrase" `
-    -ContentType "application/json" `
-    -Body '{"text":"Hello from PowerShell"}'
+    backend/.env.example — committed (template)
 
-## Error Handling (Normalized)
+    backend/.env — local only (DO NOT COMMIT)
 
-## The API returns a stable error shape:
-    {
-    "code": "SOME_CODE",
-    "message": "Human readable message",
-    "details": []
-    }
+Required Environment Variables (Azure OpenAI)
 
-    Common cases:
-    400 VALIDATION_ERROR — request validation failures
-    429 RATE_LIMIT_EXCEEDED — upstream rate limiting (may include Retry-After)
-    502 LLM_PROVIDER_FAILURE — upstream provider errors (auth, deployment not found, connection issues)
-    504 LLM_TIMEOUT — upstream timeout
-    500 INTERNAL_ERROR — unexpected errors or invalid model output
+In backend/.env:
 
-## Tests
-    Backend tests live in backend/tests.
-    Run all tests:
-    cd C:\SPA-Project\backend
-    python -m pytest -q
+LLM_MODE=real
+ALLOW_REAL_LLM=1
 
+AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
+AZURE_OPENAI_API_KEY=<your-key>
+AZURE_OPENAI_API_VERSION=2024-10-21
+AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
+AZURE_OPENAI_TIMEOUT_SECONDS=30
+
+Notes
+
+    AZURE_OPENAI_DEPLOYMENT is the Azure deployment name (e.g. gpt-5-chat)
+
+    .env is loaded automatically at startup via python-dotenv
+
+Start Backend in Real Mode
+
+cd C:\SPA-Project\backend
+python -m uvicorn app.main:app --reload --port 3000
+
+Manual Request (PowerShell)
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:3000/rephrase" `
+  -ContentType "application/json" `
+  -Body '{"text":"Hello from PowerShell"}'
+
+Error Handling (Normalized)
+
+All errors return a stable shape:
+
+{
+  "code": "SOME_CODE",
+  "message": "Human readable message",
+  "details": []
+}
+
+Common Error Codes
+Status	Code	Meaning
+400	VALIDATION_ERROR	Invalid request
+429	RATE_LIMIT_EXCEEDED	Upstream rate limiting
+502	LLM_PROVIDER_FAILURE	Provider errors
+504	LLM_TIMEOUT	Upstream timeout
+500	INTERNAL_ERROR	Unexpected or invalid model output
+Tests
+
+Backend tests live in:
+
+backend/tests
+
+Run all tests:
+
+cd C:\SPA-Project\backend
+python -m pytest -q
 
 Scripts (PowerShell)
-    Common helpers are in C:\SPA-Project\scripts:
-    Examples:
-    Start_Frontend.ps1
-    Start_Backend_Real.ps1 / Start_Backend_Test.ps1
-    Test_Backend.ps1 / Test_Backend_Debug.ps1
-    Smoke_Rephrase.ps1
-    Run a script like:
-    C:\SPA-Project\scripts\Test_Backend.ps1
 
+Common helpers live in:
+
+C:\SPA-Project\scripts
+
+Examples:
+
+    Start_Frontend.ps1
+
+    Start_Backend_Real.ps1
+
+    Start_Backend_Test.ps1
+
+    Test_Backend.ps1
+
+    Smoke_Rephrase.ps1
+
+Run a script:
+
+C:\SPA-Project\scripts\Test_Backend.ps1
